@@ -131,18 +131,35 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
         keys.emplace_back(pt.x, pt.y, 0);
     }
 
-    // compute descriptors for selected points
+    // get the descriptors [1, 64, H/8, W/8]
     auto *descTensorPtr = outputTensors[0].GetTensorMutableData<float>();
 
+    // normalize the descriptors along the channel dimension
+    for (int i = 0; i < shw; ++i) {
+        double sum = 0;
+        for (int j = 0; j < 64; ++j) {
+            sum += descTensorPtr[j * shw + i] * descTensorPtr[j * shw + i];
+        }
+        float invNorm = static_cast<float>(1.0 / std::max(std::sqrt(sum), 1e-12));
+        for (int j = 0; j < 64; ++j) {
+            descTensorPtr[j * shw + i] *= invNorm;
+        }
+    }
+
+    // bilinear interpolation to get the descriptors
     descs = cv::Mat::zeros((int)keys.size(), 64, CV_32F);
     for (int n = 0; n < (int)(keys.size()); ++n) {
         const auto &pt = keys[n];
-        float x = pt.pt.x / 8.f;
-        float y = pt.pt.y / 8.f;
+        // align_corner = False
+        float x = (pt.pt.x / 639.f) * 80 - 0.5f;
+        float y = (pt.pt.y / 639.f) * 80 - 0.5f;
+//        align_corner = True
+//        float x = (pt.pt.x / 639.f * 79.f);
+//        float y = (pt.pt.y / 639.f * 79.f);
 
         // interpolate
-        int x0 = (int)x;
-        int y0 = (int)y;
+        int x0 = cvFloor(x);
+        int y0 = cvFloor(y);
         int x1 = x0 + 1;
         int y1 = y0 + 1;
         float dx = x - static_cast<float>(x0);
@@ -153,6 +170,7 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
         float w11 = dx * dy;
 
         auto* desc_n_ptr = descs.ptr<float>(n);
+        double sum = 0;
         for (int i = 0; i < 64; ++i) {
             int iShw = i * shw;
             float v00 = descTensorPtr[iShw + y0 * Wd8_ + x0];
@@ -160,6 +178,13 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
             float v10 = descTensorPtr[iShw + y1 * Wd8_ + x0];
             float v11 = descTensorPtr[iShw + y1 * Wd8_ + x1];
             desc_n_ptr[i] = w00 * v00 + w01 * v01 + w10 * v10 + w11 * v11;
+            sum += desc_n_ptr[i] * desc_n_ptr[i];
+        }
+
+        // normalize
+        float invNorm = static_cast<float>(1.0 / std::max(std::sqrt(sum), 1e-12));
+        for (int i = 0; i < 64; ++i) {
+            desc_n_ptr[i] *= invNorm;
         }
     }
 
