@@ -2,6 +2,17 @@
 #include "OnnxHelper.h"
 
 
+inline void CalcBicubicWeights(float t, float &wm1, float &w0, float &w1, float &w2) {
+    constexpr float a = -0.75f;
+    float t2 = t * t;
+    float t3 = t2 * t;
+    wm1 = a * (t3 - 2 * t2 + t);
+    w0  = (a+2) * t3 - (a+3) * t2 + 1;
+    w1  = -(a+2) * t3 + (2*a+3) * t2 - a * t;
+    w2  = a * (-t3 + t2);
+}
+
+
 XFeat::XFeat(const std::string &modelFile) {
     // Convert the modelFile path to onnx compatible path
     std::vector<ORTCHAR_T> modelFileOrt;
@@ -148,6 +159,8 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
 
     // bilinear interpolation to get the descriptors
     descs = cv::Mat::zeros((int)keys.size(), 64, CV_32F);
+    float wxm1, wx0, wx1, wx2;
+    float wym1, wy0, wy1, wy2;
     for (int n = 0; n < (int)(keys.size()); ++n) {
         const auto &pt = keys[n];
         // align_corner = False
@@ -157,7 +170,8 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
 //        float x = (pt.pt.x / 639.f * 79.f);
 //        float y = (pt.pt.y / 639.f * 79.f);
 
-        // interpolate
+#if 0
+        // bilinear interpolate
         int x0 = cvFloor(x);
         int y0 = cvFloor(y);
         int x1 = x0 + 1;
@@ -180,6 +194,40 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
             desc_n_ptr[i] = w00 * v00 + w01 * v01 + w10 * v10 + w11 * v11;
             sum += desc_n_ptr[i] * desc_n_ptr[i];
         }
+#else
+        // bicubic interpolate
+        int x0 = cvFloor(x);
+        int y0 = cvFloor(y);
+        int xm1 = x0 - 1;
+        int ym1 = y0 - 1;
+        int x1 = x0 + 1;
+        int y1 = y0 + 1;
+        int x2 = x0 + 2;
+        int y2 = y0 + 2;
+        float dx = x - static_cast<float>(x0);
+        float dy = y - static_cast<float>(y0);
+
+        CalcBicubicWeights(dx, wxm1, wx0, wx1, wx2);
+        CalcBicubicWeights(dy, wym1, wy0, wy1, wy2);
+
+        auto* desc_n_ptr = descs.ptr<float>(n);
+        double sum = 0;
+        for (int i = 0; i < 64; ++i) {
+            int iShw = i * shw;
+            int idx_m1 = iShw + ym1 * Wd8_ + xm1;
+            float v_m1 = wxm1 * descTensorPtr[idx_m1] + wx0 * descTensorPtr[idx_m1 + 1] + wx1 * descTensorPtr[idx_m1 + 2] + wx2 * descTensorPtr[idx_m1 + 3];
+            int idx0 = iShw + y0 * Wd8_ + xm1;
+            float v0 = wxm1 * descTensorPtr[idx0] + wx0 * descTensorPtr[idx0 + 1] + wx1 * descTensorPtr[idx0 + 2] + wx2 * descTensorPtr[idx0 + 3];
+            int idx1 = iShw + y1 * Wd8_ + xm1;
+            float v1 = wxm1 * descTensorPtr[idx1] + wx0 * descTensorPtr[idx1 + 1] + wx1 * descTensorPtr[idx1 + 2] + wx2 * descTensorPtr[idx1 + 3];
+            int idx2 = iShw + y2 * Wd8_ + xm1;
+            float v2 = wxm1 * descTensorPtr[idx2] + wx0 * descTensorPtr[idx2 + 1] + wx1 * descTensorPtr[idx2 + 2] + wx2 * descTensorPtr[idx2 + 3];
+            float v = wym1 * v_m1 + wy0 * v0 + wy1 * v1 + wy2 * v2;
+            desc_n_ptr[i] = v;
+            sum += v * v;
+        }
+
+#endif
 
         // normalize
         float invNorm = static_cast<float>(1.0 / std::max(std::sqrt(sum), 1e-12));
