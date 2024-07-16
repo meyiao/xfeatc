@@ -1,5 +1,7 @@
 # xfeatc
-cpp port the [xfeat](https://github.com/verlab/accelerated_features).
+Cpp port of [xfeat](https://github.com/verlab/accelerated_features).
+The pre&post processing steps have been carefully checked to make sure that the results align well with the original pytorch code.
+
 
 # Usage
 ### 1. Prepare onnxruntime.    
