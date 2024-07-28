@@ -32,3 +32,6 @@ target_link_libraries(DetectDemo ${LIBS})
 
 add_executable(MatchDemo MatchDemo.cc ${SRC})
 target_link_libraries(MatchDemo ${LIBS})
+
+add_executable(FlowDemo FlowDemo.cc ${SRC})
+target_link_libraries(FlowDemo ${LIBS})
