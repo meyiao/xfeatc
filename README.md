@@ -1,6 +1,6 @@
 # xfeatc
 Cpp port of [xfeat](https://github.com/verlab/accelerated_features).
-The pre&post processing steps have been carefully checked to make sure that the results align well with the original pytorch code.
+The pre&post processing steps have been carefully validated to make sure that the results align well with the original pytorch code.
 
 
 # Usage
@@ -10,14 +10,18 @@ Download onnxruntime suitable for your system from [here](https://github.com/mic
 
 ### 2. Build
 ```bash
-cmake .. -DONNXRUNTIME_ROOT=YOUR_ONNXRUNTIME_DIR
+mkdir build && cd build
+cmake .. -DONNXRUNTIME_ROOT=D:/software/onnxruntime-win-x64-1.18.0
+make -j3
 ```
 
 ### 3. Run
 You can directly run the `DetectDemo` and `MatchDemo`, the data has been prepared in the `data/` folder.
 
+![](assets/detect_output.png)
+
 <mark> I have fixed the input image dimension to 1x1x640x640 when exporting the onnx model, so these demos can 
-only support 640x640 gray images for now. </mark>
+only support 640x640 gray images for now. Please use the attached python code to export your own onnx model if you want to support other image sizes.</mark>
 
 # Export onnx
 if you are interested in how to export onnx using pytorch, here is my code:
