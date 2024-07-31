@@ -161,11 +161,13 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
     descs = cv::Mat::zeros((int)keys.size(), 64, CV_32F);
     float wxm1, wx0, wx1, wx2;
     float wym1, wy0, wy1, wy2;
+    const float width_scale = float(Wd8_) / float(W_ - 1);
+    const float height_scale = float(Hd8_) / float(H_ - 1);
     for (int n = 0; n < (int)(keys.size()); ++n) {
         const auto &pt = keys[n];
         // align_corner = False
-        float x = (pt.pt.x / 639.f) * 80 - 0.5f;
-        float y = (pt.pt.y / 639.f) * 80 - 0.5f;
+        float x = pt.pt.x * width_scale - 0.5f;
+        float y = pt.pt.y * height_scale - 0.5f;
 //        align_corner = True
 //        float x = (pt.pt.x / 639.f * 79.f);
 //        float y = (pt.pt.y / 639.f * 79.f);
