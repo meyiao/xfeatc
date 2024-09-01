@@ -7,7 +7,7 @@
 int main(int argc, char** argv) {
     // parse arguments
     const std::string argKeys =
-            "{model | ../model/xfeat.onnx | model file path}"
+            "{model | ../model/xfeat_640x640.onnx | model file path}"
             "{img | ../data/1.png | image file path}";
     cv::CommandLineParser parser(argc, argv, argKeys);
     auto modelFile = parser.get<std::string>("model");
