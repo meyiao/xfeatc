@@ -8,7 +8,7 @@
 int main(int argc, char** argv) {
     // parse arguments
     const std::string argKeys =
-            "{model | ../model/xfeat.onnx | model file path}"
+            "{model | ../model/xfeat_640x640.onnx | model file path}"
             "{img1 | ../data/1.png | the first image file path}"
             "{img2 | ../data/2.png | the second image file path}";
     cv::CommandLineParser parser(argc, argv, argKeys);

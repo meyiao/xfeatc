@@ -62,16 +62,25 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
         return;
     }
 
-    if (img.rows != H_ || img.cols != W_) {
+    if (img.rows < H_ || img.cols < W_) {
         std::cerr << "Image size mismatch!" << img.rows << ", " << img.cols << std::endl;
         return;
     }
 
+    const int roiX = (img.cols - W_) / 2;
+    const int roiY = (img.rows - H_) / 2;
+
     // convert image to tensor
     cv::Mat fimg;
-    img.convertTo(fimg, CV_32F, 1.0/255.0);
+    if (img.rows == H_ && img.cols == W_) {
+        img.convertTo(fimg, CV_32F, 1.0/255.0);
+    } else {
+        cv::Rect roi(roiX, roiY, W_, H_);
+        cv::Mat roiImg = img(roi);
+        roiImg.convertTo(fimg, CV_32F, 1.0/255.0);
+    }
     std::vector<Ort::Value> inputTensors;
-    inputTensors.emplace_back(OnnxHelper::CreateTensor<float>(inputInfos_[0].shape, fimg.ptr<float>(), img.rows * img.cols, true));
+    inputTensors.emplace_back(OnnxHelper::CreateTensor<float>(inputInfos_[0].shape, fimg.ptr<float>(), W_ * H_, true));
 
     // run inference
     // outputTensors:
@@ -236,6 +245,12 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
         for (int i = 0; i < 64; ++i) {
             desc_n_ptr[i] *= invNorm;
         }
+    }
+
+    // add the edge
+    for (auto &key : keys) {
+        key.pt.x += static_cast<float>(roiX);
+        key.pt.y += static_cast<float>(roiY);
     }
 
 }
