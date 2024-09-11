@@ -80,7 +80,18 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
         roiImg.convertTo(fimg, CV_32F, 1.0/255.0);
     }
     std::vector<Ort::Value> inputTensors;
-    inputTensors.emplace_back(OnnxHelper::CreateTensor<float>(inputInfos_[0].shape, fimg.ptr<float>(), W_ * H_, true));
+    std::vector<float> imgData(W_ * H_ * 3);
+    if (img.channels() == 1) {
+        inputTensors.emplace_back(OnnxHelper::CreateTensor<float>(inputInfos_[0].shape, fimg.ptr<float>(), W_ * H_, true));
+    } else if (img.channels() == 3) {
+        // the color image in opencv is stored as [h, w, c], we need to convert it to [c, h, w】
+        std::vector<cv::Mat> bgrChannels(3);
+        cv::split(fimg, bgrChannels);
+        for (int i = 0; i < 3; i++) {
+            memcpy(imgData.data() + i * W_ * H_, bgrChannels[i].ptr<float>(), W_ * H_ * sizeof(float));
+        }
+        inputTensors.emplace_back(OnnxHelper::CreateTensor<float>(inputInfos_[0].shape, imgData.data(), W_ * H_ * 3, true));
+    }
 
     // run inference
     // outputTensors:
