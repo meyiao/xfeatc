@@ -1,5 +1,6 @@
 #include "XFeat.h"
 #include "OnnxHelper.h"
+#include "Timer.h"
 
 
 inline void CalcBicubicWeights(float t, float &wm1, float &w0, float &w1, float &w2) {
@@ -56,6 +57,7 @@ XFeat::XFeat(const std::string &modelFile) {
 
 
 void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys, cv::Mat &descs, int maxCorners) {
+    Timer timer;
     // check image size
     if (img.channels() != inputInfos_[0].shape[1]) {
         std::cerr << "Image channel mismatch!" << img.channels() << std::endl;
@@ -90,6 +92,7 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
     auto outputTensors = ortSession_->Run(Ort::RunOptions{nullptr}, inputNames_.data(),
                                           inputTensors.data(), 1, outputNames_.data(), outputNames_.size());
 
+    timer.Reset();
     // get the keypoint scores, it's a [1, 65, H/8, W/8] tensor,
     // we shall apply softmax along the 65 channels to get the scores
     auto* kptScorePtr = outputTensors[1].GetTensorMutableData<float>();
@@ -103,7 +106,9 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
             kptScorePtr[j * shw + i] = std::exp(kptScorePtr[j * shw + i]) / sum;
         }
     }
+    double score_softmax_time = timer.Elapse();
 
+    timer.Reset();
     // the keypoint score tensor [1, 65, H/8, W/8], we drop the last channel(dust bin), and convert to [H, W] image
     cv::Mat scoreImg(H_, W_, CV_32F);
     for (int i = 0; i < 64; ++i) {
@@ -119,26 +124,35 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
             }
         }
     }
+    double score_reshape_time = timer.Elapse();
 
+    timer.Reset();
     // apply nms, only keep the points with score > 0.05 and is the local maxima in a 5x5 window
     Nms(scoreImg, 0.05f, nmsKernelSize_, scoredPoints_);
+    double nms_time = timer.Elapse();
 
+    timer.Reset();
     // get the reliability map [1, 1, H/8, W/8]
     auto* heatMapPtr = outputTensors[2].GetTensorMutableData<float>();
     cv::Mat heatMapSmall(Hd8_, Wd8_, CV_32F, heatMapPtr);
     // resize it to [H, W]
     cv::Mat heaMapFull;
     cv::resize(heatMapSmall, heaMapFull, cv::Size(W_, H_));
+    double heatMap_resize_time = timer.Elapse();
 
+    timer.Reset();
     // multiply the point score with reliability
     for (auto &pt : scoredPoints_) {
         pt.score *= heaMapFull.at<float>(pt.y, pt.x);
     }
+    double heatMap_mul_time = timer.Elapse();
 
+    timer.Reset();
     // sort the points by score
     std::sort(scoredPoints_.begin(), scoredPoints_.end(), [](const ScoredPoint &a, const ScoredPoint &b) {
         return a.score > b.score;
     });
+    double sort_time = timer.Elapse();
 
     // only keep the top maxCorners points
     if (scoredPoints_.size() > maxCorners) {
@@ -151,6 +165,7 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
         keys.emplace_back(pt.x, pt.y, 0);
     }
 
+    timer.Reset();
     // get the descriptors [1, 64, H/8, W/8]
     auto *descTensorPtr = outputTensors[0].GetTensorMutableData<float>();
 
@@ -165,7 +180,9 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
             descTensorPtr[j * shw + i] *= invNorm;
         }
     }
+    double desc_norm_time = timer.Elapse();
 
+    timer.Reset();
     // bilinear interpolation to get the descriptors
     descs = cv::Mat::zeros((int)keys.size(), 64, CV_32F);
     float wxm1, wx0, wx1, wx2;
@@ -246,6 +263,12 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
             desc_n_ptr[i] *= invNorm;
         }
     }
+    double interp_time = timer.Elapse();
+
+    std::cout << "score_softmax_time=" << score_softmax_time << ", score_reshape_time=" << score_reshape_time << ", nms_time=" << nms_time << std::endl;
+    std::cout << "heatmap_resize_time=" << heatMap_resize_time << ", heatmap_mul_time=" << heatMap_mul_time << ", sort_time=" << sort_time << std::endl;
+    std::cout << "desc_norm_time=" << desc_norm_time << ", interp_time=" << interp_time << std::endl;
+    std::cout << "total_time=" << (score_softmax_time +score_reshape_time + nms_time + heatMap_resize_time + heatMap_mul_time + sort_time + desc_norm_time + interp_time) << std::endl;
 
     // add the edge
     for (auto &key : keys) {
