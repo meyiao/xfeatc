@@ -23,11 +23,13 @@ public:
     void Nms(const cv::Mat &scores, float scoreThresh, int kernelSize, std::vector<ScoredPoint>& points);
 
 private:
-    void ReshapeScore(const float* src, float *dst, int h, int w, int c);
+    void Reshape(const float* src, float *dst, int h, int w, int c);
 
     void SoftmaxScore(float *score, int h, int w, int c);
 
     void FlattenScore(float *src, float *dst);
+
+    void InterpDescriptor(const float *descMat, float *descriptor, float ptx, float pty);
 
 private:
     std::unique_ptr<Ort::Env> ortEnv_;

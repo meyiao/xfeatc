@@ -119,7 +119,7 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
     // reshape the score into [H/8, W/8, 65] tensor
     timer.Reset();
     std::vector<float> cScore(Hd8_ * Wd8_ * 65);
-    ReshapeScore(kptScorePtr, cScore.data(), Hd8_, Wd8_, 65);
+    Reshape(kptScorePtr, cScore.data(), Hd8_, Wd8_, 65);
     double score_shuffle_time = timer.Elapse();
 
     timer.Reset();
@@ -162,30 +162,43 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
     });
     double sort_time = timer.Elapse();
 
-    // only keep the top maxCorners points
-    if (scoredPoints_.size() > maxCorners) {
-        scoredPoints_.resize(maxCorners);
-    }
-
     // convert the scored points to cv::KeyPoint
+    // border is calculated in this way:
+    // width_scale = Wd8 / (W - 1)
+    // pt.x * width_scale - 0.5 > 1 && pt.x * width_scale - 0.5 < width - 2
+    const int minEdgeX = 12, maxEdgeX = W_ - 12;
+    const int minEdgeY = 12, maxEdgeY = H_ - 12;
     keys.clear();
     for (const auto &pt : scoredPoints_) {
+        if (pt.x <= minEdgeX || pt.x >= maxEdgeX || pt.y <= minEdgeY || pt.y >= maxEdgeY) {
+            continue;
+        }
         keys.emplace_back(pt.x, pt.y, 0);
+        if (keys.size() >= maxCorners) {
+            break;
+        }
     }
 
-    timer.Reset();
     // get the descriptors [1, 64, H/8, W/8]
     auto *descTensorPtr = outputTensors[0].GetTensorMutableData<float>();
 
+    // reshape the descriptors into [H/8, W/8, 64] tensor
+    timer.Reset();
+    std::vector<float> cDesc(Hd8_ * Wd8_ * 64);
+    Reshape(descTensorPtr, cDesc.data(), Hd8_, Wd8_, 64);
+    double desc_shuffle_time = timer.Elapse();
+
     // normalize the descriptors along the channel dimension
+    timer.Reset();
     for (int i = 0; i < shw; ++i) {
         double sum = 0;
+        float *ptr = &cDesc[i * 64];
         for (int j = 0; j < 64; ++j) {
-            sum += descTensorPtr[j * shw + i] * descTensorPtr[j * shw + i];
+            sum += ptr[j] * ptr[j];
         }
         float invNorm = static_cast<float>(1.0 / std::max(std::sqrt(sum), 1e-12));
         for (int j = 0; j < 64; ++j) {
-            descTensorPtr[j * shw + i] *= invNorm;
+            ptr[j] *= invNorm;
         }
     }
     double desc_norm_time = timer.Elapse();
@@ -206,77 +219,15 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
 //        float x = (pt.pt.x / 639.f * 79.f);
 //        float y = (pt.pt.y / 639.f * 79.f);
 
-#if 0
-        // bilinear interpolate
-        int x0 = cvFloor(x);
-        int y0 = cvFloor(y);
-        int x1 = x0 + 1;
-        int y1 = y0 + 1;
-        float dx = x - static_cast<float>(x0);
-        float dy = y - static_cast<float>(y0);
-        float w00 = (1 - dx) * (1 - dy);
-        float w01 = dx * (1 - dy);
-        float w10 = (1 - dx) * dy;
-        float w11 = dx * dy;
-
-        auto* desc_n_ptr = descs.ptr<float>(n);
-        double sum = 0;
-        for (int i = 0; i < 64; ++i) {
-            int iShw = i * shw;
-            float v00 = descTensorPtr[iShw + y0 * Wd8_ + x0];
-            float v01 = descTensorPtr[iShw + y0 * Wd8_ + x1];
-            float v10 = descTensorPtr[iShw + y1 * Wd8_ + x0];
-            float v11 = descTensorPtr[iShw + y1 * Wd8_ + x1];
-            desc_n_ptr[i] = w00 * v00 + w01 * v01 + w10 * v10 + w11 * v11;
-            sum += desc_n_ptr[i] * desc_n_ptr[i];
-        }
-#else
-        // bicubic interpolate
-        int x0 = cvFloor(x);
-        int y0 = cvFloor(y);
-        int xm1 = x0 - 1;
-        int ym1 = y0 - 1;
-        int x1 = x0 + 1;
-        int y1 = y0 + 1;
-        int x2 = x0 + 2;
-        int y2 = y0 + 2;
-        float dx = x - static_cast<float>(x0);
-        float dy = y - static_cast<float>(y0);
-
-        CalcBicubicWeights(dx, wxm1, wx0, wx1, wx2);
-        CalcBicubicWeights(dy, wym1, wy0, wy1, wy2);
-
-        auto* desc_n_ptr = descs.ptr<float>(n);
-        double sum = 0;
-        for (int i = 0; i < 64; ++i) {
-            int iShw = i * shw;
-            int idx_m1 = iShw + ym1 * Wd8_ + xm1;
-            float v_m1 = wxm1 * descTensorPtr[idx_m1] + wx0 * descTensorPtr[idx_m1 + 1] + wx1 * descTensorPtr[idx_m1 + 2] + wx2 * descTensorPtr[idx_m1 + 3];
-            int idx0 = iShw + y0 * Wd8_ + xm1;
-            float v0 = wxm1 * descTensorPtr[idx0] + wx0 * descTensorPtr[idx0 + 1] + wx1 * descTensorPtr[idx0 + 2] + wx2 * descTensorPtr[idx0 + 3];
-            int idx1 = iShw + y1 * Wd8_ + xm1;
-            float v1 = wxm1 * descTensorPtr[idx1] + wx0 * descTensorPtr[idx1 + 1] + wx1 * descTensorPtr[idx1 + 2] + wx2 * descTensorPtr[idx1 + 3];
-            int idx2 = iShw + y2 * Wd8_ + xm1;
-            float v2 = wxm1 * descTensorPtr[idx2] + wx0 * descTensorPtr[idx2 + 1] + wx1 * descTensorPtr[idx2 + 2] + wx2 * descTensorPtr[idx2 + 3];
-            float v = wym1 * v_m1 + wy0 * v0 + wy1 * v1 + wy2 * v2;
-            desc_n_ptr[i] = v;
-            sum += v * v;
-        }
-
-#endif
-
-        // normalize
-        float invNorm = static_cast<float>(1.0 / std::max(std::sqrt(sum), 1e-12));
-        for (int i = 0; i < 64; ++i) {
-            desc_n_ptr[i] *= invNorm;
-        }
+        // interpolate and normalize the descriptor
+        InterpDescriptor(cDesc.data(), descs.ptr<float>(n), x, y);
     }
     double interp_time = timer.Elapse();
 
     std::cout << "score_shuffle_time=" << score_shuffle_time << ", score_softmax_time=" << score_softmax_time << ", score_flatten_time=" << score_flatten_time << ", nms_time=" << nms_time << std::endl;
     std::cout << "heatmap_resize_time=" << heatMap_resize_time << ", heatmap_mul_time=" << heatMap_mul_time << ", sort_time=" << sort_time << std::endl;
-    std::cout << "desc_norm_time=" << desc_norm_time << ", interp_time=" << interp_time << std::endl;
-    std::cout << "total_time=" << (score_shuffle_time + score_softmax_time +score_flatten_time + nms_time + heatMap_resize_time + heatMap_mul_time + sort_time + desc_norm_time + interp_time) << std::endl;
+    std::cout << "desc_shuffle_time=" << desc_shuffle_time << ", desc_norm_time=" << desc_norm_time << ", interp_time=" << interp_time << std::endl;
+    std::cout << "total_time=" << (score_shuffle_time + score_softmax_time +score_flatten_time + nms_time + heatMap_resize_time + heatMap_mul_time + sort_time + desc_shuffle_time + desc_norm_time + interp_time) << std::endl;
 
     // add the edge
     for (auto &key : keys) {
@@ -346,7 +297,7 @@ void XFeat::Nms(const cv::Mat &scores, float scoreThresh, int kernelSize, std::v
 }
 
 
-void XFeat::ReshapeScore(const float *src, float *dst, int h, int w, int c) {
+void XFeat::Reshape(const float *src, float *dst, int h, int w, int c) {
     // src is in shape [c, h, w], dst is in shape [h, w, c]
     const int hw = h * w;
     int dstIdx = 0;
@@ -394,5 +345,54 @@ void XFeat::FlattenScore(float *src, float *dst) {
                 }
             }
         }
+    }
+}
+
+
+void XFeat::InterpDescriptor(const float *descMat, float *descriptor, float ptx, float pty) {
+    int x0 = cvFloor(ptx);
+    int y0 = cvFloor(pty);
+    int xm1 = x0 - 1;
+    int ym1 = y0 - 1;
+    float dx = ptx - static_cast<float>(x0);
+    float dy = pty - static_cast<float>(y0);
+
+    float wxm1, wx0, wx1, wx2;
+    float wym1, wy0, wy1, wy2;
+    CalcBicubicWeights(dx, wxm1, wx0, wx1, wx2);
+    CalcBicubicWeights(dy, wym1, wy0, wy1, wy2);
+
+    const float* desc_xm1_ym1 = descMat + ym1 * Wd8_ * 64 + xm1 * 64;
+    const float* desc_x0_ym1 = desc_xm1_ym1 + 64;
+    const float* desc_x1_ym1 = desc_x0_ym1 + 64;
+    const float* desc_x2_ym1 = desc_x1_ym1 + 64;
+    const float* desc_xm1_y0 = desc_xm1_ym1 + Wd8_ * 64;
+    const float* desc_x0_y0 = desc_xm1_y0 + 64;
+    const float* desc_x1_y0 = desc_x0_y0 + 64;
+    const float* desc_x2_y0 = desc_x1_y0 + 64;
+    const float* desc_xm1_y1 = desc_xm1_y0 + Wd8_ * 64;
+    const float* desc_x0_y1 = desc_xm1_y1 + 64;
+    const float* desc_x1_y1 = desc_x0_y1 + 64;
+    const float* desc_x2_y1 = desc_x1_y1 + 64;
+    const float* desc_xm1_y2 = desc_xm1_y1 + Wd8_ * 64;
+    const float* desc_x0_y2 = desc_xm1_y2 + 64;
+    const float* desc_x1_y2 = desc_x0_y2 + 64;
+    const float* desc_x2_y2 = desc_x1_y2 + 64;
+
+    double sum = 0;
+    for (int i = 0; i < 64; ++i) {
+        float v_m1 = wxm1 * desc_xm1_ym1[i] + wx0 * desc_x0_ym1[i] + wx1 * desc_x1_ym1[i] + wx2 * desc_x2_ym1[i];
+        float v_0 = wxm1 * desc_xm1_y0[i] + wx0 * desc_x0_y0[i] + wx1 * desc_x1_y0[i] + wx2 * desc_x2_y0[i];
+        float v_1 = wxm1 * desc_xm1_y1[i] + wx0 * desc_x0_y1[i] + wx1 * desc_x1_y1[i] + wx2 * desc_x2_y1[i];
+        float v_2 = wxm1 * desc_xm1_y2[i] + wx0 * desc_x0_y2[i] + wx1 * desc_x1_y2[i] + wx2 * desc_x2_y2[i];
+        float v = wym1 * v_m1 + wy0 * v_0 + wy1 * v_1 + wy2 * v_2;
+        descriptor[i] = v;
+        sum += v * v;
+    }
+
+    // normalize
+    float invNorm = static_cast<float>(1.0 / std::max(std::sqrt(sum), 1e-12));
+    for (int i = 0; i < 64; ++i) {
+        descriptor[i] *= invNorm;
     }
 }
