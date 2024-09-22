@@ -170,6 +170,7 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
     timer.Reset();
     // the keypoint score tensor [1, 65, H/8, W/8], we drop the last channel(dust bin), and convert to [H, W] image
     cv::Mat scoreImg(H_, W_, CV_32F);
+    auto *scoreImgPtr = scoreImg.ptr<float>();
     for (int i = 0; i < 64; ++i) {
         const int ir = i / 8;
         const int ic = i % 8;
@@ -179,7 +180,7 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
             const int kWd8 = k * Wd8_;
             for (int j = 0; j < Wd8_; ++j) {
                 int col = j * 8 + ic;
-                scoreImg.at<float>(row, col) = kptScorePtr[iShw + kWd8 + j];
+                scoreImgPtr[row * W_ + col] = kptScorePtr[iShw + kWd8 + j];
             }
         }
     }
