@@ -112,79 +112,27 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
     auto outputTensors = ortSession_->Run(Ort::RunOptions{nullptr}, inputNames_.data(),
                                           inputTensors.data(), 1, outputNames_.data(), outputNames_.size());
 
-    timer.Reset();
     // get the keypoint scores, it's a [1, 65, H/8, W/8] tensor,
-    // we shall apply softmax along the 65 channels to get the scores
     auto* kptScorePtr = outputTensors[1].GetTensorMutableData<float>();
     const int shw = Hd8_ * Wd8_;
-    for (int i = 0; i < shw; ++i) {
-        float sum = 0;
-        for (int j = 0; j < 65; ++j) {
-            float ex = std::expf(kptScorePtr[j * shw + i]);
-            kptScorePtr[j*shw + i] = ex;
-            sum += ex;
-        }
-        const float invSum = 1.0f / sum;
-        for (int j = 0; j < 65; ++j) {
-            kptScorePtr[j * shw + i] *= invSum;
-        }
-    }
-    double score_softmax_time = timer.Elapse();
 
-//    // reshape the score into [H/8, W/8, 65] tensor
-//    timer.Reset();
-//    const int wd8_65 = Wd8_ * 65;
-//    std::vector<float> cScore(Hd8_ * Wd8_ * 65);
-//    for (int i = 0; i < Hd8_; ++i) {
-//        for (int j = 0; j < Wd8_; ++j) {
-//            for (int k = 0; k < 65; ++k) {
-//                cScore[i * wd8_65 + j * 65 + k] = kptScorePtr[k * shw + i * Wd8_ + j];
-//            }
-//        }
-//    }
-//    double score_reshape2_time = timer.Elapse();
-//    std::cout << "score reshape2 time: " << score_reshape2_time << std::endl;
-//
-//    // softmax
-//    timer.Reset();
-//    for (int i = 0; i < Hd8_; ++i) {
-//        for (int j = 0; j < Wd8_; ++j) {
-//            float *ptr = &cScore[i * wd8_65 + j * 65];
-//            float sum = 0;
-//            for (int k = 0; k < 65; ++k) {
-//                float ex = FastExp(ptr[k]);
-//                ptr[k] = ex;
-//                sum += ex;
-//            }
-//            const float invSum = 1.0f / sum;
-//            for (int k = 0; k < 65; ++k) {
-//                ptr[k] *= invSum;
-//            }
-//        }
-//    }
-//    double score_softmax2_time = timer.Elapse();
-//    std::cout << "score softmax2 time: " << score_softmax2_time << std::endl;
-
-
+    // reshape the score into [H/8, W/8, 65] tensor
+    timer.Reset();
+    std::vector<float> cScore(Hd8_ * Wd8_ * 65);
+    ReshapeScore(kptScorePtr, cScore.data(), Hd8_, Wd8_, 65);
+    double score_shuffle_time = timer.Elapse();
 
     timer.Reset();
-    // the keypoint score tensor [1, 65, H/8, W/8], we drop the last channel(dust bin), and convert to [H, W] image
+    // we shall apply softmax along the 65 channels to get the scores
+    SoftmaxScore(cScore.data(), Hd8_, Wd8_, 65);
+    double score_softmax_time = timer.Elapse();
+
+    timer.Reset();
+    // the keypoint score tensor [1, H/8, W/8, 65], we drop the last channel(dust bin), and convert to [H, W] image
     cv::Mat scoreImg(H_, W_, CV_32F);
     auto *scoreImgPtr = scoreImg.ptr<float>();
-    for (int i = 0; i < 64; ++i) {
-        const int ir = i / 8;
-        const int ic = i % 8;
-        const int iShw = i * shw;
-        for (int k = 0; k < Hd8_; ++k) {
-            const int row = k * 8 + ir;
-            const int kWd8 = k * Wd8_;
-            for (int j = 0; j < Wd8_; ++j) {
-                int col = j * 8 + ic;
-                scoreImgPtr[row * W_ + col] = kptScorePtr[iShw + kWd8 + j];
-            }
-        }
-    }
-    double score_reshape_time = timer.Elapse();
+    FlattenScore(cScore.data(), scoreImgPtr);
+    double score_flatten_time = timer.Elapse();
 
     timer.Reset();
     // apply nms, only keep the points with score > 0.05 and is the local maxima in a 5x5 window
@@ -325,10 +273,10 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
     }
     double interp_time = timer.Elapse();
 
-    std::cout << "score_softmax_time=" << score_softmax_time << ", score_reshape_time=" << score_reshape_time << ", nms_time=" << nms_time << std::endl;
+    std::cout << "score_shuffle_time=" << score_shuffle_time << ", score_softmax_time=" << score_softmax_time << ", score_flatten_time=" << score_flatten_time << ", nms_time=" << nms_time << std::endl;
     std::cout << "heatmap_resize_time=" << heatMap_resize_time << ", heatmap_mul_time=" << heatMap_mul_time << ", sort_time=" << sort_time << std::endl;
     std::cout << "desc_norm_time=" << desc_norm_time << ", interp_time=" << interp_time << std::endl;
-    std::cout << "total_time=" << (score_softmax_time +score_reshape_time + nms_time + heatMap_resize_time + heatMap_mul_time + sort_time + desc_norm_time + interp_time) << std::endl;
+    std::cout << "total_time=" << (score_shuffle_time + score_softmax_time +score_flatten_time + nms_time + heatMap_resize_time + heatMap_mul_time + sort_time + desc_norm_time + interp_time) << std::endl;
 
     // add the edge
     for (auto &key : keys) {
@@ -395,4 +343,56 @@ void XFeat::Nms(const cv::Mat &scores, float scoreThresh, int kernelSize, std::v
     }
 
 
+}
+
+
+void XFeat::ReshapeScore(const float *src, float *dst, int h, int w, int c) {
+    // src is in shape [c, h, w], dst is in shape [h, w, c]
+    const int hw = h * w;
+    int dstIdx = 0;
+    for (int i = 0; i < h; i++) {
+        const int iw = i * w;
+        for (int j = 0; j < w; j++) {
+            const int iwj = iw + j;
+            for (int k = 0; k < c; k++) {
+                dst[dstIdx++] = src[k * hw + iwj];
+            }
+        }
+    }
+}
+
+
+void XFeat::SoftmaxScore(float *score, int h, int w, int c) {
+    for (int i = 0; i < h; i++) {
+        for (int j = 0; j < w; j++) {
+            float *ptr = score + i * w * c + j * c;
+            float sum = 0;
+            for (int k = 0; k < c; ++k) {
+                float exp = std::exp(ptr[k]);
+                ptr[k] = exp;
+                sum += exp;
+            }
+            float invSum = 1.0f / sum;
+            for (int k = 0; k < c; ++k) {
+                ptr[k] *= invSum;
+            }
+        }
+    }
+}
+
+
+void XFeat::FlattenScore(float *src, float *dst) {
+    for (int i = 0; i < Hd8_; ++i) {
+        for (int j = 0; j < Wd8_; ++j) {
+            float* src_ptr = src + i * Wd8_ * 65 + j * 65;
+            int iRow = i * 8;
+            int jCol = j * 8;
+            float* dst_ptr = dst +iRow * W_ + jCol;
+            for (int k = 0; k < 8; ++k) {
+                for (int l = 0; l < 8; ++l) {
+                    dst_ptr[k * W_ + l] = src_ptr[k * 8 + l];
+                }
+            }
+        }
+    }
 }
