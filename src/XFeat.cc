@@ -13,6 +13,26 @@ inline void CalcBicubicWeights(float t, float &wm1, float &w0, float &w1, float 
     w2  = a * (-t3 + t2);
 }
 
+//https://gist.github.com/jrade/293a73f89dfef51da6522428c857802d
+inline float FastExp(float x)
+{
+    constexpr float a = (1 << 23) / 0.69314718f;
+    constexpr float b = (1 << 23) * (127 - 0.043677448f);
+    x = a * x + b;
+
+    // Remove these lines if bounds checking is not needed
+    constexpr float c = (1 << 23);
+    constexpr float d = (1 << 23) * 255;
+    if (x < c || x > d)
+        x = (x < c) ? 0.0f : d;
+
+    // With C++20 one can use std::bit_cast instead
+    uint32_t n = static_cast<uint32_t>(x);
+    memcpy(&x, &n, 4);
+    return x;
+}
+
+
 
 XFeat::XFeat(const std::string &modelFile) {
     // Convert the modelFile path to onnx compatible path
@@ -100,13 +120,52 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
     for (int i = 0; i < shw; ++i) {
         float sum = 0;
         for (int j = 0; j < 65; ++j) {
-            sum += std::exp(kptScorePtr[j * shw + i]);
+            float ex = std::expf(kptScorePtr[j * shw + i]);
+            kptScorePtr[j*shw + i] = ex;
+            sum += ex;
         }
+        const float invSum = 1.0f / sum;
         for (int j = 0; j < 65; ++j) {
-            kptScorePtr[j * shw + i] = std::exp(kptScorePtr[j * shw + i]) / sum;
+            kptScorePtr[j * shw + i] *= invSum;
         }
     }
     double score_softmax_time = timer.Elapse();
+
+//    // reshape the score into [H/8, W/8, 65] tensor
+//    timer.Reset();
+//    const int wd8_65 = Wd8_ * 65;
+//    std::vector<float> cScore(Hd8_ * Wd8_ * 65);
+//    for (int i = 0; i < Hd8_; ++i) {
+//        for (int j = 0; j < Wd8_; ++j) {
+//            for (int k = 0; k < 65; ++k) {
+//                cScore[i * wd8_65 + j * 65 + k] = kptScorePtr[k * shw + i * Wd8_ + j];
+//            }
+//        }
+//    }
+//    double score_reshape2_time = timer.Elapse();
+//    std::cout << "score reshape2 time: " << score_reshape2_time << std::endl;
+//
+//    // softmax
+//    timer.Reset();
+//    for (int i = 0; i < Hd8_; ++i) {
+//        for (int j = 0; j < Wd8_; ++j) {
+//            float *ptr = &cScore[i * wd8_65 + j * 65];
+//            float sum = 0;
+//            for (int k = 0; k < 65; ++k) {
+//                float ex = FastExp(ptr[k]);
+//                ptr[k] = ex;
+//                sum += ex;
+//            }
+//            const float invSum = 1.0f / sum;
+//            for (int k = 0; k < 65; ++k) {
+//                ptr[k] *= invSum;
+//            }
+//        }
+//    }
+//    double score_softmax2_time = timer.Elapse();
+//    std::cout << "score softmax2 time: " << score_softmax2_time << std::endl;
+
+
 
     timer.Reset();
     // the keypoint score tensor [1, 65, H/8, W/8], we drop the last channel(dust bin), and convert to [H, W] image
