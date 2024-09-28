@@ -1,10 +1,14 @@
 # xfeatc
 Cpp port of [xfeat](https://github.com/verlab/accelerated_features).
-The pre&post processing steps have been carefully validated to make sure that the results align well with the original pytorch code.
 
 ## The original work
 * https://github.com/verlab/accelerated_features/tree/main
 
+## Features
+* The pre&post processing steps have been carefully validated to make sure that the results align well with the original pytorch code.
+* The InstanceNormalization layer has been moved from the model to pre-processing step
+* The outputs have been changed from [B, C, H, W] to [B, H, W, C], which makes the post-processing much faster.
+* Use FastExp instead of std::exp to speed up the softmax operation.
 
 # Usage
 ### 1. Prepare onnxruntime.    

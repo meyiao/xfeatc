@@ -200,8 +200,6 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
     timer.Reset();
     // bilinear interpolation to get the descriptors
     descs = cv::Mat::zeros((int)keys.size(), 64, CV_32F);
-    float wxm1, wx0, wx1, wx2;
-    float wym1, wy0, wy1, wy2;
     const float width_scale = float(Wd8_) / float(W_ - 1);
     const float height_scale = float(Hd8_) / float(H_ - 1);
     for (int n = 0; n < (int)(keys.size()); ++n) {
