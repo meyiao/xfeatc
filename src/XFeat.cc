@@ -106,32 +106,26 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
 
     // run inference
     // outputTensors:
-    // 0: [1, 64, H/8, W/8] descriptors
-    // 1: [1, 65, H/8, W/8] keypoint scores
+    // 0: [1, H/8, W/8, 64] descriptors
+    // 1: [1, H/8, W/8, 65] keypoint scores
     // 2: [1, 1, H/8, W/8] reliability map
     auto outputTensors = ortSession_->Run(Ort::RunOptions{nullptr}, inputNames_.data(),
                                           inputTensors.data(), 1, outputNames_.data(), outputNames_.size());
 
-    // get the keypoint scores, it's a [1, 65, H/8, W/8] tensor,
+    // get the keypoint scores, it's a [1, H/8, W/8, 65] tensor,
     auto* kptScorePtr = outputTensors[1].GetTensorMutableData<float>();
     const int shw = Hd8_ * Wd8_;
 
-    // reshape the score into [H/8, W/8, 65] tensor
-    timer.Reset();
-    std::vector<float> cScore(Hd8_ * Wd8_ * 65);
-    Reshape(kptScorePtr, cScore.data(), Hd8_, Wd8_, 65);
-    double score_shuffle_time = timer.Elapse();
-
     timer.Reset();
     // we shall apply softmax along the 65 channels to get the scores
-    SoftmaxScore(cScore.data(), Hd8_, Wd8_, 65);
+    SoftmaxScore(kptScorePtr, Hd8_, Wd8_, 65);
     double score_softmax_time = timer.Elapse();
 
     timer.Reset();
     // the keypoint score tensor [1, H/8, W/8, 65], we drop the last channel(dust bin), and convert to [H, W] image
     cv::Mat scoreImg(H_, W_, CV_32F);
     auto *scoreImgPtr = scoreImg.ptr<float>();
-    FlattenScore(cScore.data(), scoreImgPtr);
+    FlattenScore(kptScorePtr, scoreImgPtr);
     double score_flatten_time = timer.Elapse();
 
     timer.Reset();
@@ -179,20 +173,14 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
         }
     }
 
-    // get the descriptors [1, 64, H/8, W/8]
+    // get the descriptors [1, H/8, W/8, 64]
     auto *descTensorPtr = outputTensors[0].GetTensorMutableData<float>();
-
-    // reshape the descriptors into [H/8, W/8, 64] tensor
-    timer.Reset();
-    std::vector<float> cDesc(Hd8_ * Wd8_ * 64);
-    Reshape(descTensorPtr, cDesc.data(), Hd8_, Wd8_, 64);
-    double desc_shuffle_time = timer.Elapse();
 
     // normalize the descriptors along the channel dimension
     timer.Reset();
     for (int i = 0; i < shw; ++i) {
         double sum = 0;
-        float *ptr = &cDesc[i * 64];
+        float *ptr = &descTensorPtr[i * 64];
         for (int j = 0; j < 64; ++j) {
             sum += ptr[j] * ptr[j];
         }
@@ -220,14 +208,14 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
 //        float y = (pt.pt.y / 639.f * 79.f);
 
         // interpolate and normalize the descriptor
-        InterpDescriptor(cDesc.data(), descs.ptr<float>(n), x, y);
+        InterpDescriptor(descTensorPtr, descs.ptr<float>(n), x, y);
     }
     double interp_time = timer.Elapse();
 
-    std::cout << "score_shuffle_time=" << score_shuffle_time << ", score_softmax_time=" << score_softmax_time << ", score_flatten_time=" << score_flatten_time << ", nms_time=" << nms_time << std::endl;
+    std::cout << ", score_softmax_time=" << score_softmax_time << ", score_flatten_time=" << score_flatten_time << ", nms_time=" << nms_time << std::endl;
     std::cout << "heatmap_resize_time=" << heatMap_resize_time << ", heatmap_mul_time=" << heatMap_mul_time << ", sort_time=" << sort_time << std::endl;
-    std::cout << "desc_shuffle_time=" << desc_shuffle_time << ", desc_norm_time=" << desc_norm_time << ", interp_time=" << interp_time << std::endl;
-    std::cout << "total_time=" << (score_shuffle_time + score_softmax_time +score_flatten_time + nms_time + heatMap_resize_time + heatMap_mul_time + sort_time + desc_shuffle_time + desc_norm_time + interp_time) << std::endl;
+    std::cout << ", desc_norm_time=" << desc_norm_time << ", interp_time=" << interp_time << std::endl;
+    std::cout << "total_time=" << (score_softmax_time +score_flatten_time + nms_time + heatMap_resize_time + heatMap_mul_time + sort_time + desc_norm_time + interp_time) << std::endl;
 
     // add the edge
     for (auto &key : keys) {
