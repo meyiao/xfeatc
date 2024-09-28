@@ -95,12 +95,18 @@ void XFeat::DetectAndCompute(const cv::Mat &img, std::vector<cv::KeyPoint> &keys
     // convert image to tensor
     cv::Mat fimg;
     if (img.rows == H_ && img.cols == W_) {
-        img.convertTo(fimg, CV_32F, 1.0/255.0);
+        img.convertTo(fimg, CV_32F);
     } else {
         cv::Rect roi(roiX, roiY, W_, H_);
-        cv::Mat roiImg = img(roi);
-        roiImg.convertTo(fimg, CV_32F, 1.0/255.0);
+        img(roi).convertTo(fimg, CV_32F);
     }
+
+    // normalize image
+    cv::Scalar mean, std;
+    cv::meanStdDev(fimg, mean, std);
+    fimg -= mean;
+    fimg /= std;
+
     std::vector<Ort::Value> inputTensors;
     inputTensors.emplace_back(OnnxHelper::CreateTensor<float>(inputInfos_[0].shape, fimg.ptr<float>(), W_ * H_, true));
 
