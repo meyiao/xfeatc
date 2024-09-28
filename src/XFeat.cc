@@ -285,29 +285,13 @@ void XFeat::Nms(const cv::Mat &scores, float scoreThresh, int kernelSize, std::v
 }
 
 
-void XFeat::Reshape(const float *src, float *dst, int h, int w, int c) {
-    // src is in shape [c, h, w], dst is in shape [h, w, c]
-    const int hw = h * w;
-    int dstIdx = 0;
-    for (int i = 0; i < h; i++) {
-        const int iw = i * w;
-        for (int j = 0; j < w; j++) {
-            const int iwj = iw + j;
-            for (int k = 0; k < c; k++) {
-                dst[dstIdx++] = src[k * hw + iwj];
-            }
-        }
-    }
-}
-
-
 void XFeat::SoftmaxScore(float *score, int h, int w, int c) {
     for (int i = 0; i < h; i++) {
         for (int j = 0; j < w; j++) {
             float *ptr = score + i * w * c + j * c;
             float sum = 0;
             for (int k = 0; k < c; ++k) {
-                float exp = std::exp(ptr[k]);
+                float exp = FastExp(ptr[k]);
                 ptr[k] = exp;
                 sum += exp;
             }

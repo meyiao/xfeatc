@@ -23,8 +23,6 @@ public:
     void Nms(const cv::Mat &scores, float scoreThresh, int kernelSize, std::vector<ScoredPoint>& points);
 
 private:
-    void Reshape(const float* src, float *dst, int h, int w, int c);
-
     void SoftmaxScore(float *score, int h, int w, int c);
 
     void FlattenScore(float *src, float *dst);
