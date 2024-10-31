@@ -24,7 +24,6 @@ make -j3
 
 ### 3. Run
 You can directly run the `DetectDemo` and `MatchDemo`, the data has been prepared in the `data/` folder.
-
 ![](assets/detect_output.png)
 
 <mark> I have fixed the input image dimension to 1x1x640x640 when exporting the onnx model, so these demos can 
@@ -75,6 +74,8 @@ for i in range(len(outputs)):
     print("\n")
 
 ```
+
+***please use [this fork](https://github.com/meyiao/accelerated_features/tree/main), since I have changed the output dimension order***
 
 # License
 Notice that the original XFeat code and the exported model is under Apache 2.0 license.   
