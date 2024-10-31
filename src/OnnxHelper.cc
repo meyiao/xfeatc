@@ -10,7 +10,7 @@ void OnnxHelper::GetModelInfo(Ort::Session &session, std::vector<TensorInfo> &in
     size_t numInputNodes = session.GetInputCount();
     std::cout << "Number of inputs = " << numInputNodes << std::endl;
     for (size_t i = 0; i < numInputNodes; ++i) {
-        auto name = session.GetInputNameAllocated(i, allocator).get();
+        std::string name(session.GetInputNameAllocated(i, allocator).get());
         auto inputTypeInfo = session.GetInputTypeInfo(i);
         std::vector<int64_t> inShape = inputTypeInfo.GetTensorTypeAndShapeInfo().GetShape();
         inputInfos.emplace_back(TensorInfo{name, inShape, inputTypeInfo.GetONNXType()});
@@ -19,7 +19,7 @@ void OnnxHelper::GetModelInfo(Ort::Session &session, std::vector<TensorInfo> &in
     size_t numOutputNodes = session.GetOutputCount();
     std::cout << "Number of outputs = " << numOutputNodes << std::endl;
     for (size_t i = 0; i < numOutputNodes; ++i) {
-        auto name = session.GetOutputNameAllocated(i, allocator).get();
+        std::string name(session.GetOutputNameAllocated(i, allocator).get());
         auto outputTypeInfo = session.GetOutputTypeInfo(i);
         std::vector<int64_t> outShape = outputTypeInfo.GetTensorTypeAndShapeInfo().GetShape();
         outputInfos.emplace_back(TensorInfo{name, outShape, outputTypeInfo.GetONNXType()});
