@@ -10,14 +10,17 @@ int main(int argc, char** argv) {
     const std::string argKeys =
             "{model | ../model/xfeat_640x640.onnx | model file path}"
             "{img1 | ../data/1.png | the first image file path}"
-            "{img2 | ../data/2.png | the second image file path}";
+            "{img2 | ../data/2.png | the second image file path}"
+            "{ransac | 0 | use RANSAC to refine matches}";
     cv::CommandLineParser parser(argc, argv, argKeys);
     auto modelFile = parser.get<std::string>("model");
     auto imgFile1 = parser.get<std::string>("img1");
     auto imgFile2 = parser.get<std::string>("img2");
+    auto useRansac = parser.get<int>("ransac");
     std::cout << "model file: " << modelFile << std::endl;
     std::cout << "image file 1: " << imgFile1 << std::endl;
     std::cout << "image file 2: " << imgFile2 << std::endl;
+    std::cout << "use RANSAC: " << (useRansac ? "true" : "false") << std::endl;
 
     // create XFeat object
     std::cout << "creating XFeat...\n";
@@ -51,6 +54,17 @@ int main(int argc, char** argv) {
     std::cout << "matching ...\n";
     std::vector<cv::DMatch> matches;
     Matcher::Match(descs1, descs2, matches, 0.82f);
+
+    // remove outlier matches, notice that this only works for undistorted keypoints.
+    // If you have distorted keypoints (fisheye images for example), you need to undistort them first.
+    if (useRansac) {
+        std::vector<cv::Point2f> pts1, pts2;
+        for (auto& m : matches) {
+            pts1.push_back(keys1[m.queryIdx].pt);
+            pts2.push_back(keys2[m.trainIdx].pt);
+        }
+        Matcher::RejectBadMatchesF(pts1, pts2, matches, 4.0f);
+    }
 
     // draw matches
     cv::Mat imgMatches;

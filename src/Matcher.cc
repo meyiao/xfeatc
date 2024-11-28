@@ -5,6 +5,18 @@
 #include "Matcher.h"
 
 
+template <typename T>
+static void ReduceVector(std::vector<T>& v, std::vector<uchar>& status) {
+    int j = 0;
+    for (int i=0; i<(int)(v.size()); i++) {
+        if (status[i]) {
+            v[j++] = v[i];
+        }
+    }
+    v.resize(j);
+}
+
+
 void Matcher::Match(const cv::Mat &descs1, const cv::Mat &descs2,
                     std::vector<cv::DMatch> &matches, float minScore) {
     cv::Mat scores12 = descs1 * descs2.t();
@@ -45,4 +57,18 @@ void Matcher::Match(const cv::Mat &descs1, const cv::Mat &descs2,
             matches.emplace_back(i, j, scores12.at<float>(i, j));
         }
     }
+}
+
+
+bool Matcher::RejectBadMatchesF(std::vector<cv::Point2f> &pts1, std::vector<cv::Point2f> &pts2,
+                                std::vector<cv::DMatch> &matches, float thresh) {
+    assert(pts1.size()==pts2.size() && pts1.size()==matches.size());
+    if (pts1.size() < 8) {
+        return false;
+    }
+
+    std::vector<uchar> status;
+    cv::findFundamentalMat(pts1, pts2, cv::FM_RANSAC, thresh, 0.999, status);
+    ReduceVector(matches, status);
+    return true;
 }
