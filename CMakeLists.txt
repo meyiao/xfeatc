@@ -8,7 +8,14 @@ find_package(OpenCV REQUIRED)
 # onnxruntime
 #set(ONNXRUNTIME_ROOT D:/Software/onnxruntime-win-x64-1.18.0)
 set(ONNXRUNTIME_INCLUDE_DIRS ${ONNXRUNTIME_ROOT}/include)
-set(ONNXRUNTIME_LIBS ${ONNXRUNTIME_ROOT}/lib/onnxruntime.lib)
+#
+if (CMAKE_SYSTEM_NAME MATCHES "Windows")
+    message(STATUS "Running on Windows")
+    set(ONNXRUNTIME_LIBS ${ONNXRUNTIME_ROOT}/lib/onnxruntime.lib)
+elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
+    message(STATUS "Running on Linux")
+    set(ONNXRUNTIME_LIBS ${ONNXRUNTIME_ROOT}/libonnxruntime.so)
+endif ()
 
 include_directories(
         ${ONNXRUNTIME_INCLUDE_DIRS}
